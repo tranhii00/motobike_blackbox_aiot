@@ -1,0 +1,1640 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AIoT EDR Blackbox - Giám Sát & Tái Hiện Hiện Trường Tai Nạn Xe Máy</title>
+  
+  <!-- Fonts Google -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- MQTT over WebSocket Client -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  
+  <!-- Leaflet GIS Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Chart.js Realtime Waveforms -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    /* ==========================================================================
+       HỆ THỐNG MÀU BIẾN THIÊN SÁNG / TỐI (THEMING SYSTEM)
+       ========================================================================== */
+    :root[data-theme="dark"] {
+      --bg-body: #070a13;
+      --bg-header: rgba(15, 23, 42, 0.92);
+      --bg-card: #0f172a;
+      --bg-card-inner: #1e293b;
+      --border-color: #334155;
+      --border-subtle: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.25);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --danger-glow: rgba(239, 68, 68, 0.45);
+      --map-filter: brightness(0.9) contrast(1.1);
+      --modal-bg: #0f172a;
+    }
+
+    :root[data-theme="light"] {
+      --bg-body: #f1f5f9;
+      --bg-header: rgba(255, 255, 255, 0.95);
+      --bg-card: #ffffff;
+      --bg-card-inner: #f8fafc;
+      --border-color: #cbd5e1;
+      --border-subtle: #e2e8f0;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dim: #94a3b8;
+      --accent: #0284c7;
+      --accent-glow: rgba(2, 132, 199, 0.15);
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --danger-glow: rgba(220, 38, 38, 0.3);
+      --map-filter: none;
+      --modal-bg: #ffffff;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease; }
+    body { background-color: var(--bg-body); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ==========================================================================
+       1. TOP HEADER BAR
+       ========================================================================== */
+    header {
+      background: var(--bg-header);
+      backdrop-filter: blur(12px);
+      padding: 8px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+      z-index: 1000;
+      min-height: 56px;
+    }
+
+    .brand-wrap { display: flex; align-items: center; gap: 12px; }
+    .brand-badge {
+      width: 36px; height: 36px; background: linear-gradient(135deg, #0284c7, #38bdf8);
+      border-radius: 9px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 18px; color: white; box-shadow: 0 0 16px var(--accent-glow);
+    }
+    .brand-text h1 { font-size: 15px; font-weight: 800; letter-spacing: 0.3px; line-height: 1.2; }
+    .brand-text p { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+
+    .header-center { display: flex; align-items: center; gap: 10px; }
+
+    /* Banner Cảnh Báo Tai Nạn Trung Tâm */
+    .alarm-banner {
+      padding: 6px 16px; border-radius: 30px; font-weight: 700; font-size: 12px;
+      letter-spacing: 0.4px; display: flex; align-items: center; gap: 8px;
+      transition: all 0.3s ease;
+    }
+    .banner-normal {
+      background: rgba(16, 185, 129, 0.15); color: var(--success);
+      border: 1px solid var(--success);
+    }
+    .banner-crash {
+      background: var(--danger); color: white; border: 1px solid #fca5a5;
+      animation: crash-pulse 0.7s infinite alternate; box-shadow: 0 0 25px var(--danger-glow);
+    }
+    @keyframes crash-pulse { from { transform: scale(1); } to { transform: scale(1.04); } }
+
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+
+    .status-pill {
+      padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 600;
+      display: flex; align-items: center; gap: 6px; background: var(--bg-card-inner); border: 1px solid var(--border-color);
+    }
+    .pill-online { color: var(--success); }
+    .pill-offline { color: var(--warning); }
+
+    .btn-action {
+      background: var(--bg-card-inner); border: 1px solid var(--border-color); color: var(--text-main);
+      padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 600;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .btn-action:hover { border-color: var(--accent); background: var(--border-color); }
+
+    /* ==========================================================================
+       2. MAIN DASHBOARD LAYOUT (3 CỘT)
+       ========================================================================== */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 350px 1fr 340px;
+      gap: 10px;
+      padding: 10px;
+      flex: 1;
+      height: calc(100vh - 56px);
+      overflow: hidden;
+    }
+
+    .col-left, .col-right {
+      display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 3px;
+    }
+    .col-center {
+      display: flex; flex-direction: column; gap: 10px; height: 100%; overflow: hidden;
+    }
+
+    /* Card giao diện chung */
+    .ui-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    }
+    .card-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+      padding-bottom: 5px; border-bottom: 1px solid var(--border-subtle);
+    }
+    .card-header h2 {
+      font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted);
+      letter-spacing: 0.6px; display: flex; align-items: center; gap: 6px;
+    }
+    .card-tag { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: var(--bg-card-inner); color: var(--accent); }
+
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* ==========================================================================
+       3. CỤM CƠ NĂNG: ĐỒNG HỒ VÒNG CUNG TỐC ĐỘ, GÓC NGHIÊNG, GIA TỐC
+       ========================================================================== */
+    /* Đồng hồ tốc độ dạng Vòng Cung Bán Nguyệt (Radial Speedometer) */
+    .speed-gauge-box {
+      background: var(--bg-card-inner); border-radius: 10px; padding: 10px;
+      border: 1px solid var(--border-subtle); text-align: center; position: relative;
+    }
+    .gauge-svg-wrap {
+      width: 170px; height: 95px; margin: 0 auto; position: relative;
+    }
+    .gauge-text-overlay {
+      position: absolute; bottom: 0; left: 0; width: 100%; text-align: center;
+    }
+    .speed-number { font-size: 38px; font-weight: 800; line-height: 0.9; color: var(--text-main); }
+    .speed-unit { font-size: 12px; font-weight: 700; color: var(--accent); }
+    .speed-footer {
+      display: flex; justify-content: space-between; align-items: center; margin-top: 6px;
+      font-size: 11px; padding: 0 6px;
+    }
+    .speed-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 12px;
+      background: var(--success); color: white;
+    }
+
+    /* Đồng hồ góc nghiêng nhân tạo (Inclinometer) */
+    .tilt-container { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tilt-box {
+      background: var(--bg-card-inner); border-radius: 8px; padding: 8px; border: 1px solid var(--border-subtle);
+      text-align: center;
+    }
+    .tilt-dial {
+      width: 64px; height: 64px; border-radius: 50%; border: 3px dashed var(--accent);
+      margin: 4px auto; display: flex; align-items: center; justify-content: center;
+      position: relative; transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .tilt-bike-icon { font-size: 24px; transform-origin: center center; transition: transform 0.2s ease; }
+    .tilt-val { font-size: 18px; font-weight: 700; color: var(--accent); }
+
+    /* Gia tốc 3 trục */
+    .accel-bars { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+    .accel-row { display: flex; flex-direction: column; gap: 2px; }
+    .accel-label-wrap { display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; }
+    .progress-track {
+      width: 100%; height: 6px; background: var(--bg-card-inner); border-radius: 999px; overflow: hidden;
+      border: 1px solid var(--border-subtle); position: relative;
+    }
+    .progress-fill { height: 100%; border-radius: 999px; transition: width 0.2s ease; }
+
+    /* ==========================================================================
+       4. BẢN ĐỒ GIS & HIỆN TRƯỜNG TAI NẠN
+       ========================================================================== */
+    .map-wrapper {
+      flex: 1; min-height: 250px; border-radius: 12px; overflow: hidden;
+      border: 1px solid var(--border-color); position: relative;
+    }
+    #map { width: 100%; height: 100%; filter: var(--map-filter); }
+
+    .map-floating-overlay {
+      position: absolute; top: 10px; right: 10px; z-index: 1000;
+      background: var(--bg-header); backdrop-filter: blur(10px);
+      padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.25); font-size: 11px; line-height: 1.5;
+    }
+
+    /* Thanh Tua lại & Tái hiện hiện trường (Replay Controller Bar) */
+    .replay-card {
+      background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px;
+      padding: 8px 14px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .replay-header {
+      display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700;
+    }
+    .replay-controls {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .replay-btn {
+      background: var(--bg-card-inner); border: 1px solid var(--border-color); color: var(--text-main);
+      padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .replay-btn:hover { background: var(--border-color); color: var(--accent); }
+    .replay-btn-active { background: var(--accent); color: white; border-color: var(--accent); }
+    .replay-slider {
+      flex: 1; accent-color: var(--accent); cursor: pointer; height: 6px;
+    }
+    .replay-time-display {
+      font-size: 12px; font-weight: 800; min-width: 65px; text-align: right;
+    }
+
+    /* ==========================================================================
+       5. ĐỒ THỊ SÓNG THỜI GIAN THỰC (REALTIME WAVEFORM)
+       ========================================================================== */
+    .chart-wrapper { height: 165px; position: relative; }
+
+    /* ==========================================================================
+       6. KHỐI NGUỒN & PHẦN CỨNG HỘP ĐEN
+       ========================================================================== */
+    .diag-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .diag-item {
+      background: var(--bg-card-inner); border-radius: 7px; padding: 6px 8px;
+      border: 1px solid var(--border-subtle); font-size: 11px;
+    }
+    .diag-item-title { color: var(--text-dim); margin-bottom: 2px; font-size: 10px; text-transform: uppercase; font-weight: 700; }
+    .diag-item-val { font-weight: 700; color: var(--text-main); }
+
+    /* ==========================================================================
+       7. NHẬT KÝ SỰ KIỆN HỘP ĐEN (EVENT LOG) & CÔNG CỤ DEMO
+       ========================================================================== */
+    .log-viewport {
+      background: var(--bg-card-inner); border-radius: 8px; padding: 8px;
+      height: 145px; overflow-y: auto; font-size: 11px; line-height: 1.5;
+      border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 4px;
+    }
+    .log-entry { display: flex; gap: 6px; align-items: baseline; }
+    .log-ts { color: var(--text-dim); font-size: 10px; min-width: 60px; }
+    .log-tag-crash { color: #f87171; font-weight: 800; }
+    .log-tag-normal { color: #4ade80; }
+    .log-tag-sys { color: var(--accent); }
+
+    /* Demo Tool Box */
+    .demo-bar {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px;
+    }
+    .demo-btn {
+      padding: 6px 8px; font-size: 11px; font-weight: 600; border-radius: 6px;
+      background: var(--bg-card-inner); border: 1px solid var(--border-color); color: var(--text-main);
+      cursor: pointer; text-align: center;
+    }
+    .demo-btn:hover { background: var(--border-color); color: var(--accent); }
+    .demo-btn-resume { color: var(--success); border-color: rgba(16, 185, 129, 0.4); }
+    .demo-btn-resume:hover { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+    .demo-btn-crash { color: var(--danger); border-color: rgba(239, 68, 68, 0.4); }
+    .demo-btn-crash:hover { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+    .btn-export { background: linear-gradient(135deg, #0284c7, #38bdf8); color: white; border: none; font-weight: 700; }
+    .btn-export:hover { opacity: 0.9; color: white; }
+    .btn-forensic { background: rgba(56, 189, 248, 0.12); color: var(--accent); border: 1px solid var(--accent); font-weight: 700; }
+    .btn-forensic:hover { background: var(--accent); color: white; }
+
+    /* ==========================================================================
+       8. MODAL BIÊN BẢN GIÁM ĐỊNH HIỆN TRƯỜNG KỸ THUẬT SỐ (FORENSIC MODAL)
+       ========================================================================== */
+    .modal-backdrop {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px);
+      z-index: 2000; display: none; align-items: center; justify-content: center;
+    }
+    .modal-box {
+      background: var(--modal-bg); border: 1px solid var(--border-color); border-radius: 16px;
+      width: 680px; max-width: 92vw; max-height: 88vh; overflow-y: auto; padding: 22px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4); position: relative;
+    }
+    .modal-header {
+      display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-subtle); margin-bottom: 14px;
+    }
+    .modal-header h3 { font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px; color: var(--text-main); }
+    .btn-close-modal {
+      background: var(--bg-card-inner); border: 1px solid var(--border-color); color: var(--text-muted);
+      width: 30px; height: 30px; border-radius: 50%; cursor: pointer; font-weight: 800;
+    }
+    .btn-close-modal:hover { color: var(--danger); border-color: var(--danger); }
+    .forensic-table {
+      width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px;
+    }
+    .forensic-table th, .forensic-table td {
+      padding: 8px 10px; border: 1px solid var(--border-subtle); text-align: left;
+    }
+    .forensic-table th { background: var(--bg-card-inner); color: var(--text-muted); font-size: 11px; }
+    .sha-badge {
+      background: rgba(56, 189, 248, 0.12); color: var(--accent); padding: 4px 8px;
+      border-radius: 6px; font-size: 11px; word-break: break-all; border: 1px dashed var(--accent);
+    }
+
+    /* Tùy chỉnh thanh cuộn */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+  <!-- ========================================================================
+       1. TOP HEADER BAR
+       ======================================================================== -->
+  <header>
+    <div class="brand-wrap">
+      <div class="brand-badge">E</div>
+      <div class="brand-text">
+        <h1>HỘP ĐEN AIoT XE MÁY (EDR)</h1>
+        <p>Hệ thống giám sát, phân tích & tái hiện hiện trường tai nạn thời gian thực</p>
+      </div>
+    </div>
+
+    <!-- Banner Cảnh Báo Tai Nạn Trung Tâm -->
+    <div class="header-center">
+      <div id="alarm-banner" class="alarm-banner banner-normal">
+        <span id="alarm-icon">🛡️</span>
+        <span id="alarm-text">TRẠNG THÁI: BÌNH THƯỜNG</span>
+      </div>
+      <div id="countdown-box" style="display:none; font-size:12px; font-weight:700; color:#ef4444;" class="mono">
+        (HỦY TRONG: <span id="countdown-timer">15</span>s)
+      </div>
+    </div>
+
+    <!-- Trạng thái & Tác vụ chuyển theme -->
+    <div class="header-actions">
+      <!-- Còi hú -->
+      <button id="btn-audio" class="btn-action" onclick="toggleAudio()">
+        <span id="audio-icon">🔊</span> Còi Báo: BẬT
+      </button>
+
+      <!-- Đổi Theme Ngày / Đêm -->
+      <button id="btn-theme" class="btn-action" onclick="toggleTheme()">
+        🌙 Giao diện: ĐÊM
+      </button>
+
+      <!-- Cấu hình MQTT -->
+      <button id="btn-mqtt-modal" class="btn-action" onclick="openMqttModal()">
+        <span>⚙️</span> Cấu Hình MQTT
+      </button>
+
+      <!-- Trạng thái mạng -->
+      <div id="conn-pill" class="status-pill pill-offline">
+        <span id="conn-dot">●</span> <span id="conn-text">Đang kết nối MQTT...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       2. MAIN DASHBOARD CONTENT (3-COLUMN GRID)
+       ======================================================================== -->
+  <div class="dashboard-grid">
+
+    <!-- CỘT TRÁI: CƠ NĂNG & ĐỘNG HỌC XE (TELEMETRY) -->
+    <div class="col-left">
+
+      <!-- Tốc độ GNSS (Đồng hồ Vòng Cung Bán Nguyệt) -->
+      <div class="ui-card">
+        <div class="card-header">
+          <h2><span>🏎️ Tốc Độ Di Chuyển</span></h2>
+          <span class="card-tag">GNSS / GPS</span>
+        </div>
+        <div class="speed-gauge-box">
+          <div class="gauge-svg-wrap">
+            <svg viewBox="0 0 200 120" style="width:100%; height:100%;">
+              <defs>
+                <linearGradient id="speedGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#10b981" />
+                  <stop offset="55%" stop-color="#38bdf8" />
+                  <stop offset="80%" stop-color="#f59e0b" />
+                  <stop offset="100%" stop-color="#ef4444" />
+                </linearGradient>
+              </defs>
+              <!-- Track mờ -->
+              <path d="M 25 105 A 75 75 0 0 1 175 105" fill="none" stroke="var(--border-subtle)" stroke-width="12" stroke-linecap="round"/>
+              <!-- Vạch cung tốc độ di chuyển -->
+              <path id="gauge-arc" d="M 25 105 A 75 75 0 0 1 175 105" fill="none" stroke="url(#speedGrad)" stroke-width="12" stroke-linecap="round"
+                    stroke-dasharray="235.6" stroke-dashoffset="235.6" style="transition: stroke-dashoffset 0.3s ease;"/>
+            </svg>
+            <div class="gauge-text-overlay">
+              <span id="val-speed" class="speed-number mono">0.0</span>
+              <span class="speed-unit">km/h</span>
+            </div>
+          </div>
+          <div class="speed-footer">
+            <span id="speed-desc" style="color:var(--text-muted);">Xe đang dừng yên</span>
+            <span id="speed-status-badge" class="speed-badge">AN TOÀN</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Góc nghiêng xe (Inclinometer) -->
+      <div class="ui-card">
+        <div class="card-header">
+          <h2><span>📐 Góc Nghiêng Xe (Attitude)</span></h2>
+          <span class="card-tag">MPU-6050</span>
+        </div>
+        <div class="tilt-container">
+          <!-- Roll -->
+          <div class="tilt-box">
+            <div style="font-size:11px; color:var(--text-muted); font-weight:600;">Roll (Nghiêng trái/phải)</div>
+            <div class="tilt-dial">
+              <div id="bike-roll-icon" class="tilt-bike-icon">🏍️</div>
+            </div>
+            <div class="tilt-val mono"><span id="val-roll">0.0</span>°</div>
+            <div style="font-size:10px; color:var(--text-dim);">Ngưỡng ngã: > 50°</div>
+          </div>
+          <!-- Pitch -->
+          <div class="tilt-box">
+            <div style="font-size:11px; color:var(--text-muted); font-weight:600;">Pitch (Dốc lên/chúi đầu)</div>
+            <div class="tilt-dial" style="border-style: dotted;">
+              <div id="bike-pitch-icon" class="tilt-bike-icon">⬆️</div>
+            </div>
+            <div class="tilt-val mono"><span id="val-pitch">0.0</span>°</div>
+            <div style="font-size:10px; color:var(--text-dim);">Phanh gấp / dốc</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gia tốc 3 trục & Lực G-Force -->
+      <div class="ui-card">
+        <div class="card-header">
+          <h2><span>💥 Lực Tác Động G-Force</span></h2>
+          <span class="card-tag mono" id="val-gtotal" style="color:#f59e0b;">1.00 G</span>
+        </div>
+        <div class="accel-bars">
+          <!-- Trục X -->
+          <div class="accel-row">
+            <div class="accel-label-wrap">
+              <span style="color:var(--text-muted);">Trục X (Phanh / Tăng tốc dọc):</span>
+              <span id="val-ax" class="mono" style="color:var(--text-main); font-weight:700;">0.00 m/s²</span>
+            </div>
+            <div class="progress-track"><div id="bar-ax" class="progress-fill" style="width:50%; background:#38bdf8;"></div></div>
+          </div>
+          <!-- Trục Y -->
+          <div class="accel-row">
+            <div class="accel-label-wrap">
+              <span style="color:var(--text-muted);">Trục Y (Lực ly tâm quẹo cua):</span>
+              <span id="val-ay" class="mono" style="color:var(--text-main); font-weight:700;">0.00 m/s²</span>
+            </div>
+            <div class="progress-track"><div id="bar-ay" class="progress-fill" style="width:50%; background:#38bdf8;"></div></div>
+          </div>
+          <!-- Trục Z -->
+          <div class="accel-row">
+            <div class="accel-label-wrap">
+              <span style="color:var(--text-muted);">Trục Z (Trọng trường / Sóc xóc):</span>
+              <span id="val-az" class="mono" style="color:var(--text-main); font-weight:700;">9.81 m/s²</span>
+            </div>
+            <div class="progress-track"><div id="bar-az" class="progress-fill" style="width:60%; background:#10b981;"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chẩn đoán phần cứng -->
+      <div class="ui-card">
+        <div class="card-header">
+          <h2><span>⚙️ Chẩn Đoán Phần Cứng Hộp Đen</span></h2>
+          <span class="card-tag">SYSTEM</span>
+        </div>
+        <div class="diag-grid">
+          <div class="diag-item">
+            <div class="diag-item-title">Khối Nguồn</div>
+            <div class="diag-item-val" style="color:#10b981;">Ắc quy 12V (OK)</div>
+          </div>
+          <div class="diag-item">
+            <div class="diag-item-title">Pin LiPo Backup</div>
+            <div class="diag-item-val">3.92V (85%)</div>
+          </div>
+          <div class="diag-item">
+            <div class="diag-item-title">Thẻ Nhớ SD</div>
+            <div class="diag-item-val" id="diag-sd" style="color:#38bdf8;">Mounted (FAT32)</div>
+          </div>
+          <div class="diag-item">
+            <div class="diag-item-title">Vệ Tinh GPS</div>
+            <div class="diag-item-val" id="diag-sats">11 Vệ tinh (3D Fix)</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- CỘT GIỮA: BẢN ĐỒ GIS + TÁI HIỆN HIỆN TRƯỜNG + ĐỒ THỊ SÓNG -->
+    <div class="col-center">
+
+      <!-- Bản đồ số định vị -->
+      <div class="map-wrapper">
+        <div id="map"></div>
+
+        <!-- Overlay thông tin nổi -->
+        <div class="map-floating-overlay">
+          <div><b>Thiết bị:</b> <span id="val-device" class="mono" style="color:var(--accent);">EDR_ESP32S3_01</span></div>
+          <div><b>Tọa độ:</b> <span id="val-lat" class="mono">10.776889</span>, <span id="val-lng" class="mono">106.700806</span></div>
+          <div><b>Mạng:</b> <span id="val-net-type" style="color:#10b981;">4G LTE Cat-1 (A7682S)</span></div>
+          <div><b>Hành trình:</b> <span id="val-trip-dist" class="mono">3.45 km</span> (<span id="val-trip-time">08:12</span>)</div>
+        </div>
+      </div>
+
+      <!-- Đồ thị sóng gia tốc thời gian thực (Waveform) -->
+      <div class="ui-card" style="padding:10px 14px;">
+        <div class="card-header" style="margin-bottom:4px; padding-bottom:4px;">
+          <h2><span>📈 Đồ Thị Gia Tốc Tái Hiện Va Chạm (EDR Waveform)</span></h2>
+          <div style="font-size:10px; color:var(--text-muted);" id="chart-sub-label">
+            Mốc chuẩn: [-10s Trước] ➔ [T0 Va chạm] ➔ [+15s Sau]
+          </div>
+        </div>
+        <div class="chart-wrapper">
+          <canvas id="accelChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- CỘT PHẢI: NHẬT KÝ SỰ KIỆN, BÁO CÁO & DEMO -->
+    <div class="col-right">
+
+      <!-- Thông tin mạng 4G & RTC -->
+      <div class="ui-card">
+        <div class="card-header">
+          <h2><span>📶 Mạng Viễn Thông 4G & Giờ RTC</span></h2>
+          <span class="card-tag">A7682S</span>
+        </div>
+        <div class="diag-grid">
+          <div class="diag-item">
+            <div class="diag-item-title">Sóng Di Động</div>
+            <div class="diag-item-val mono" id="val-csq" style="color:#10b981;">CSQ: 26/31 (Rất tốt)</div>
+          </div>
+          <div class="diag-item">
+            <div class="diag-item-title">Nhà Mạng</div>
+            <div class="diag-item-val">Viettel 4G LTE</div>
+          </div>
+          <div class="diag-item" style="grid-column: span 2;">
+            <div class="diag-item-title">Đồng Hồ RTC (DS3231)</div>
+            <div class="diag-item-val mono" id="val-rtc-clock" style="color:var(--accent);">2026-10-18 17:40:00</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nhật ký sự kiện Hộp Đen -->
+      <div class="ui-card" style="flex:1; display:flex; flex-direction:column;">
+        <div class="card-header">
+          <h2><span>📋 Nhật Ký Sự Kiện Hộp Đen (EDR Log)</span></h2>
+          <span class="card-tag mono" id="log-total-badge">1 sự kiện</span>
+        </div>
+        <div id="log-container" class="log-viewport mono" style="flex:1;">
+          <div class="log-entry">
+            <span class="log-ts">[17:40:00]</span>
+            <span class="log-tag-sys">[HỆ THỐNG] Khởi tạo giao diện EDR Web Dashboard...</span>
+          </div>
+        </div>
+
+        <!-- Các nút công cụ điều khiển Demo 2 chiều -->
+        <div class="demo-bar" style="grid-template-columns: 1fr 1fr 1fr;">
+          <button class="demo-btn demo-btn-resume" onclick="resumeNormalDriving()">🔄 Chạy Tiếp</button>
+          <button class="demo-btn demo-btn-crash" onclick="simulateCrashEvent()">🚨 Test Va Chạm</button>
+          <button class="demo-btn" onclick="openReplayModal()" style="color:var(--accent); font-weight:700;">🎬 Tái Hiện 30s</button>
+        </div>
+        <div style="margin-top:6px; display:flex; gap:6px;">
+          <button class="demo-btn" style="flex:1;" onclick="clearMapTrail()">🧹 Xóa Vệt</button>
+          <button class="demo-btn btn-forensic" style="flex:1;" onclick="openForensicModal()">📄 Biên Bản EDR</button>
+          <button class="demo-btn btn-export" style="flex:1.4;" onclick="exportIncidentCSV()">📥 Báo Cáo CSV</button>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- ========================================================================
+       MODAL: PHÒNG PHÂN TÍCH & TÁI HIỆN HIỆN TRƯỜNG TAI NẠN (ACCIDENT REPLAY STUDIO)
+       ======================================================================== -->
+  <div id="replayModal" class="modal-backdrop">
+    <div class="modal-box" style="width: 780px;">
+      <div class="modal-header">
+        <h3><span>🎬 PHÒNG PHÂN TÍCH & TÁI HIỆN HIỆN TRƯỜNG TAI NẠN (EDR RECONSTRUCTION)</span></h3>
+        <button class="btn-close-modal" onclick="closeReplayModal()">✕</button>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 12px;">
+        <span style="color: var(--text-muted);">Khung đóng băng hộp đen: <b>30 Giây Viễn Trắc (-10s Trước ➔ T0 Va Chạm ➔ +15s Sau)</b></span>
+        <span id="replay-status-badge" style="color: var(--accent); font-weight: 700;">CHẾ ĐỘ THỜI GIAN THỰC</span>
+      </div>
+
+      <!-- Thẻ thông số động học tại thời điểm T đang tua -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px;">
+        <div class="tilt-box" style="padding: 8px;">
+          <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">VẬN TỐC TỨC THỜI</div>
+          <div class="mono" style="font-size: 20px; font-weight: 800; color: var(--text-main);" id="replay-stat-speed">0.0 km/h</div>
+        </div>
+        <div class="tilt-box" style="padding: 8px;">
+          <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">GÓC NGHIÊNG ROLL</div>
+          <div class="mono" style="font-size: 20px; font-weight: 800; color: var(--accent);" id="replay-stat-roll">0.0°</div>
+        </div>
+        <div class="tilt-box" style="padding: 8px;">
+          <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">TỔNG LỰC TÁC ĐỘNG</div>
+          <div class="mono" style="font-size: 20px; font-weight: 800; color: #f59e0b;" id="replay-stat-g">1.00 G</div>
+        </div>
+        <div class="tilt-box" style="padding: 8px;">
+          <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">TRẠNG THÁI HỘP ĐEN</div>
+          <div class="mono" style="font-size: 13px; font-weight: 800; color: var(--success); margin-top: 4px;" id="replay-stat-status">NORMAL</div>
+        </div>
+      </div>
+
+      <!-- Thanh trượt điều khiển Scrubber -->
+      <div style="background: var(--bg-card-inner); border-radius: 10px; padding: 14px; border: 1px solid var(--border-subtle);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">TIMELINE SCRUBBER (KÉO CHUỘT ĐỂ TUA LẠI HIỆN TRƯỜNG):</span>
+          <span class="mono" id="replay-time-label" style="font-size: 15px; font-weight: 800; color: var(--accent);">T: +15.0s</span>
+        </div>
+
+        <input type="range" id="replay-slider" class="replay-slider" style="width: 100%; margin-bottom: 14px; height: 8px;" min="-10" max="15" step="0.5" value="15" oninput="onReplaySliderInput(this.value)">
+
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div style="display: flex; gap: 6px;">
+            <button id="btn-replay-play" class="replay-btn" style="padding: 6px 14px;" onclick="toggleReplayPlay()">▶️ Phát Lại</button>
+            <button class="replay-btn" style="padding: 6px 10px;" onclick="seekReplay(-10.0)">⏮️ -10s (Pre-crash)</button>
+            <button class="replay-btn" style="padding: 6px 10px; color: #ef4444;" onclick="seekReplay(0.0)">🎯 T0 (Va Chạm)</button>
+            <button class="replay-btn" style="padding: 6px 10px;" onclick="seekReplay(15.0)">⏭️ +15s (Post-crash)</button>
+          </div>
+          <div style="font-size: 11px; color: var(--text-dim);">
+            * Vị trí xe trên bản đồ và đồ thị gia tốc tự động đồng bộ theo thanh trượt.
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px;">
+        <button class="demo-btn btn-forensic" onclick="closeReplayModal(); openForensicModal();" style="padding: 8px 14px;">📄 Mở Biên Bản Giám Định</button>
+        <button class="demo-btn" onclick="closeReplayModal()" style="padding: 8px 18px;">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL: BIÊN BẢN GIÁM ĐỊNH HIỆN TRƯỜNG KỸ THUẬT SỐ (FORENSIC REPORT)
+       ======================================================================== -->
+  <div id="forensicModal" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3><span>🛡️ BIÊN BẢN GIÁM ĐỊNH KỸ THUẬT SỐ HIỆN TRƯỜNG (EDR)</span></h3>
+        <button class="btn-close-modal" onclick="closeForensicModal()">✕</button>
+      </div>
+
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px; display:flex; justify-content:space-between;">
+        <span>Chuẩn kỹ thuật: <b>IEEE 1616 / 49 CFR Part 563</b></span>
+        <span style="color:var(--success); font-weight:700;">✓ Toàn vẹn dữ liệu được xác thực</span>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">CHỨNG THỰC MÃ BĂM PHÁP LÝ (DIGITAL EVIDENCE INTEGRITY):</div>
+        <div class="sha-badge mono" id="forensic-sha">SHA-256: 8f4e2b819ac450d03f671172be692a54e9d36184a51167b5f1e8e2d49910c2a8</div>
+      </div>
+
+      <table class="forensic-table">
+        <tbody>
+          <tr>
+            <th>Mã Thiết Bị Hộp Đen</th>
+            <td class="mono">EDR_ESP32S3_WROOM_01 (N16R8)</td>
+            <th>Mốc Giờ Chuẩn RTC</th>
+            <td class="mono" id="forensic-rtc">2026-10-18 17:46:50</td>
+          </tr>
+          <tr>
+            <th>Tọa Độ Va Chạm (GPS)</th>
+            <td class="mono" id="forensic-coords">10.776893° N, 106.701050° E</td>
+            <th>Sai Số Vị Trí (HDOP)</th>
+            <td>± 2.5 mét (11 Vệ tinh)</td>
+          </tr>
+          <tr>
+            <th>Vận Tốc Trước Va Chạm ($V_{pre}$)</th>
+            <td class="mono" style="color:var(--warning); font-weight:700;" id="forensic-vpre">48.5 km/h</td>
+            <th>Vận Tốc Sau Va Chạm ($V_{post}$)</th>
+            <td class="mono" style="color:var(--success); font-weight:700;">0.0 km/h</td>
+          </tr>
+          <tr>
+            <th>Lực Va Đập Cực Đại (Peak G)</th>
+            <td class="mono" style="color:var(--danger); font-weight:800;" id="forensic-peak-g">3.79 G (28.5 m/s²)</td>
+            <th>Góc Lật Nghiêng Xe (Roll)</th>
+            <td class="mono" style="color:var(--danger); font-weight:800;" id="forensic-roll">68.5° (Nghiêng trái)</td>
+          </tr>
+          <tr>
+            <th>Khoảng Thời Gian Đóng Băng</th>
+            <td colspan="3">30 Giây (10s Trước va chạm ➔ 5s Trong va chạm ➔ 15s Sau va chạm)</td>
+          </tr>
+          <tr>
+            <th>Phân Loại Sự Cố (Edge AI)</th>
+            <td colspan="3" style="color:#ef4444; font-weight:700;">Va Chạm Phương Tiện Kèm Lật Đổ (Severe Side-Collision & Fall-over)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+        <button class="demo-btn" onclick="openGoogleMapsExternal()" style="padding:8px 12px;">🗺️ Mở Vị Trí Trên Google Maps</button>
+        <div style="display:flex; gap:8px;">
+          <button class="demo-btn" onclick="window.print()" style="padding:8px 14px;">🖨️ In Biên Bản</button>
+          <button class="demo-btn btn-export" onclick="exportIncidentCSV()" style="padding:8px 14px;">📥 Tải File CSV</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL: CẤU HÌNH KẾT NỐI MQTT BROKER (EMQX CLOUD HOẶC PUBLIC)
+       ======================================================================== -->
+  <div id="mqttConfigModal" class="modal-backdrop">
+    <div class="modal-box" style="width: 520px;">
+      <div class="modal-header">
+        <h3><span>⚙️ CẤU HÌNH KẾT NỐI MQTT BROKER</span></h3>
+        <button class="btn-close-modal" onclick="closeMqttModal()">✕</button>
+      </div>
+
+      <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.5;">
+        Tùy chỉnh thông tin kết nối WebSocket (WSS) giữa Web Dashboard và máy chủ MQTT (EMQX Cloud riêng hoặc Public Broker).
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div>
+          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">
+            ĐỊA CHỈ WEBSOCKET BROKER (WSS URL):
+          </label>
+          <input type="text" id="cfg-broker-url" class="mono" style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card-inner); color: var(--text-main); font-size: 12px;"
+                 placeholder="wss://broker.emqx.io:8084/mqtt">
+          <span style="font-size: 10px; color: var(--text-dim); margin-top: 3px; display: block;">Ví dụ server riêng: wss://xxxxxx.emqx.cloud:8084/mqtt</span>
+        </div>
+
+        <div>
+          <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">
+            KÊNH DỮ LIỆU (TOPIC TELEMETRY):
+          </label>
+          <input type="text" id="cfg-topic" class="mono" style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card-inner); color: var(--text-main); font-size: 12px;"
+                 placeholder="edr_blackbox/telemetry">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">
+              USERNAME (TÙY CHỌN):
+            </label>
+            <input type="text" id="cfg-username" class="mono" style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card-inner); color: var(--text-main); font-size: 12px;"
+                   placeholder="Để trống nếu là public">
+          </div>
+          <div>
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">
+              PASSWORD (TÙY CHỌN):
+            </label>
+            <input type="password" id="cfg-password" class="mono" style="width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-card-inner); color: var(--text-main); font-size: 12px;"
+                   placeholder="Để trống nếu là public">
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+        <button class="demo-btn" onclick="resetMqttConfigDefault()" style="padding: 8px 12px; color: var(--warning);">
+          🔄 Khôi Phục Mặc Định
+        </button>
+        <div style="display: flex; gap: 8px;">
+          <button class="demo-btn" onclick="closeMqttModal()" style="padding: 8px 12px;">Đóng</button>
+          <button class="demo-btn btn-export" onclick="saveMqttConfig()" style="padding: 8px 16px;">💾 Lưu & Kết Nối</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       JAVASCRIPT: XỬ LÝ DỮ LIỆU, MQTT, MAP, CHART, REPLAY & THEMES
+       ======================================================================== -->
+  <script>
+    // --- 1. QUẢN LÝ THEME NGÀY / ĐÊM ---
+    let currentTheme = localStorage.getItem('edr_theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    updateThemeButtonText();
+
+    function toggleTheme() {
+      currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', currentTheme);
+      localStorage.setItem('edr_theme', currentTheme);
+      updateThemeButtonText();
+      updateChartTheme();
+    }
+
+    function updateThemeButtonText() {
+      const btn = document.getElementById('btn-theme');
+      btn.innerHTML = currentTheme === 'dark' ? '☀️ Giao diện: SÁNG' : '🌙 Giao diện: ĐÊM';
+    }
+
+    // --- 2. HỆ THỐNG CÒI HÚ WEB AUDIO API ---
+    let soundEnabled = true;
+    let audioCtx = null;
+
+    function initAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+    // Mở khóa âm thanh khi người dùng click bất cứ đâu
+    window.addEventListener('click', () => { initAudioContext(); }, { once: true });
+
+    let sirenInterval = null;
+
+    function playBeep(freq = 880, duration = 0.12) {
+      if (!soundEnabled) return;
+      initAudioContext();
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {
+        console.warn("Beep audio blocked:", e);
+      }
+    }
+
+    function toggleAudio() {
+      initAudioContext();
+      soundEnabled = !soundEnabled;
+      const btn = document.getElementById('btn-audio');
+      if (soundEnabled) {
+        btn.innerHTML = '<span id="audio-icon">🔊</span> Còi Báo: BẬT';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--text-main)';
+        playBeep(920, 0.15); // Tiếng bíp xác nhận loa hoạt động
+        addLog("ÂM THANH", "Đã BẬT còi báo động khẩn cấp.");
+      } else {
+        btn.innerHTML = '<span id="audio-icon">🔇</span> Còi Báo: TẮT';
+        btn.style.borderColor = 'var(--border-color)';
+        btn.style.color = 'var(--text-dim)';
+        stopContinuousSiren();
+        addLog("ÂM THANH", "Đã TẮT còi báo động.");
+      }
+    }
+
+    function startContinuousSiren() {
+      if (!soundEnabled) return;
+      stopContinuousSiren();
+      triggerSirenSound();
+      sirenInterval = setInterval(() => {
+        if (soundEnabled) triggerSirenSound();
+      }, 1200);
+    }
+
+    function stopContinuousSiren() {
+      if (sirenInterval) {
+        clearInterval(sirenInterval);
+        sirenInterval = null;
+      }
+    }
+
+    function triggerSirenSound() {
+      if (!soundEnabled) return;
+      initAudioContext();
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        osc.frequency.linearRampToValueAtTime(1400, audioCtx.currentTime + 0.35);
+        osc.frequency.linearRampToValueAtTime(800, audioCtx.currentTime + 0.7);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.7);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.7);
+      } catch (e) {
+        console.warn("Audio Context blocked:", e);
+      }
+    }
+
+    // --- 3. KHỞI TẠO BẢN ĐỒ GOOGLE MAPS LEAFLET ---
+    const initialLat = 10.776889;
+    const initialLng = 106.700806;
+    const map = L.map('map').setView([initialLat, initialLng], 16);
+
+    L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      attribution: '© Google Maps | AIoT EDR Blackbox'
+    }).addTo(map);
+
+    setTimeout(() => { map.invalidateSize(); }, 300);
+    window.addEventListener('resize', () => { map.invalidateSize(); });
+
+    // Marker xe máy định vị
+    const bikeIcon = L.divIcon({
+      className: 'bike-map-marker',
+      html: `<div style="background:#0284c7; width:24px; height:24px; border-radius:50%; border:3px solid white; box-shadow:0 0 15px rgba(2,132,199,0.9); display:flex; align-items:center; justify-content:center; font-size:13px;">🏍️</div>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+
+    const marker = L.marker([initialLat, initialLng], { icon: bikeIcon }).addTo(map);
+    marker.bindPopup("<b>Xe Máy EDR</b><br>Đang giám sát hành trình.").openPopup();
+
+    // Vòng tròn độ chính xác GPS (HDOP Circle)
+    const accuracyCircle = L.circle([initialLat, initialLng], {
+      radius: 5,
+      color: '#38bdf8',
+      fillColor: '#38bdf8',
+      fillOpacity: 0.15,
+      weight: 1.5
+    }).addTo(map);
+
+    // Vệt đường đi (Polyline)
+    const trailLine = L.polyline([], { color: '#0284c7', weight: 4, opacity: 0.85 }).addTo(map);
+    let crashMarkers = [];
+
+    function clearMapTrail() {
+      trailLine.setLatLngs([]);
+      crashMarkers.forEach(m => map.removeLayer(m));
+      crashMarkers = [];
+      addLog("BẢN ĐỒ", "Đã xóa toàn bộ dấu vết đường đi và điểm tai nạn.");
+    }
+
+    // --- 4. KHỞI TẠO ĐỒ THỊ SÓNG THỜI GIAN THỰC (CHART.JS) VỚI TRỤC EDR CHUẨN ---
+    const ctx = document.getElementById('accelChart').getContext('2d');
+    
+    // Mốc nhãn trục thời gian EDR: -10s đến +15s
+    const edrLabels = [
+      "-10s", "-9s", "-8s", "-7s", "-6s", "-5s", "-4s", "-3s", "-2s", "-1s",
+      "T0 (Va Chạm)",
+      "+1s", "+2s", "+3s", "+4s", "+5s", "+6s", "+7s", "+8s", "+9s", "+10s", "+11s", "+12s", "+13s", "+14s", "+15s"
+    ];
+    const totalPoints = edrLabels.length;
+    const dataAx = Array(totalPoints).fill(0);
+    const dataAy = Array(totalPoints).fill(0);
+    const dataAz = Array(totalPoints).fill(9.81);
+
+    const accelChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: edrLabels,
+        datasets: [
+          { label: 'Ax (Dọc)', data: dataAx, borderColor: '#38bdf8', borderWidth: 1.8, tension: 0.3, pointRadius: 2 },
+          { label: 'Ay (Ngang)', data: dataAy, borderColor: '#f59e0b', borderWidth: 1.8, tension: 0.3, pointRadius: 2 },
+          { label: 'Az (Đứng)', data: dataAz, borderColor: '#10b981', borderWidth: 1.8, tension: 0.3, pointRadius: 2 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: {
+            display: true,
+            grid: { color: () => currentTheme === 'dark' ? '#1e293b' : '#e2e8f0' },
+            ticks: {
+              color: (context) => context.tick && context.tick.label && context.tick.label.includes('T0') ? '#ef4444' : (currentTheme === 'dark' ? '#94a3b8' : '#64748b'),
+              font: { family: 'JetBrains Mono', size: 9, weight: (context) => context.tick && context.tick.label && context.tick.label.includes('T0') ? 'bold' : 'normal' }
+            }
+          },
+          y: {
+            min: -25, max: 30,
+            grid: { color: () => currentTheme === 'dark' ? '#1e293b' : '#e2e8f0' },
+            ticks: { color: () => currentTheme === 'dark' ? '#94a3b8' : '#475569', font: { family: 'JetBrains Mono', size: 9 } }
+          }
+        },
+        plugins: {
+          legend: { labels: { color: () => currentTheme === 'dark' ? '#cbd5e1' : '#334155', font: { size: 10 } } }
+        }
+      }
+    });
+
+    function updateChartTheme() {
+      accelChart.update();
+    }
+
+    function pushChartData(ax, ay, az) {
+      dataAx.push(ax); dataAx.shift();
+      dataAy.push(ay); dataAy.shift();
+      dataAz.push(az); dataAz.shift();
+      accelChart.update();
+    }
+
+    // --- 5. CẬP NHẬT ĐỒNG HỒ VÒNG CUNG TỐC ĐỘ (SPEED ARC GAUGE) ---
+    function updateSpeedGauge(speed) {
+      const maxSpeed = 100;
+      const arc = document.getElementById('gauge-arc');
+      const totalLen = 235.6; // Chu vi bán nguyệt bán kính 75
+      const clampSpeed = Math.min(maxSpeed, Math.max(0, speed));
+      const offset = totalLen - (clampSpeed / maxSpeed) * totalLen;
+      arc.style.strokeDashoffset = offset;
+
+      document.getElementById('val-speed').innerText = speed.toFixed(1);
+      const speedDesc = document.getElementById('speed-desc');
+      const badge = document.getElementById('speed-status-badge');
+
+      if (speed <= 0.5) {
+        speedDesc.innerText = 'Xe đang dừng yên';
+        badge.style.background = '#64748b'; badge.innerText = 'DỪNG ĐỖ';
+      } else if (speed <= 30) {
+        speedDesc.innerText = `Chạy chậm (${speed.toFixed(1)} km/h)`;
+        badge.style.background = '#10b981'; badge.innerText = 'CHẬM';
+      } else if (speed <= 60) {
+        speedDesc.innerText = `Tốc độ an toàn (${speed.toFixed(1)} km/h)`;
+        badge.style.background = '#10b981'; badge.innerText = 'AN TOÀN';
+      } else {
+        speedDesc.innerText = `Cảnh báo tốc độ (${speed.toFixed(1)} km/h)`;
+        badge.style.background = '#ef4444'; badge.innerText = 'QUÁ TỐC ĐỘ!';
+      }
+    }
+
+    // --- 6. XUẤT FILE CSV BÁO CÁO TAI NẠN ---
+    let incidentRecords = [];
+
+    function recordTelemetry(data) {
+      incidentRecords.push({
+        time: new Date().toISOString(),
+        speed: data.speed || 0,
+        ax: data.ax || 0,
+        ay: data.ay || 0,
+        az: data.az || 0,
+        roll: data.roll || 0,
+        pitch: data.pitch || 0,
+        lat: data.lat || 0,
+        lng: data.lng || 0,
+        status: data.status || 'NORMAL'
+      });
+      if (incidentRecords.length > 500) incidentRecords.shift();
+    }
+
+    function exportIncidentCSV() {
+      if (incidentRecords.length === 0) {
+        alert("Chưa có dữ liệu nào được ghi nhận!");
+        return;
+      }
+      let csv = "Timestamp,Speed_kmh,Ax_ms2,Ay_ms2,Az_ms2,Roll_deg,Pitch_deg,Lat,Lng,Status\n";
+      incidentRecords.forEach(r => {
+        csv += `${r.time},${r.speed},${r.ax},${r.ay},${r.az},${r.roll},${r.pitch},${r.lat},${r.lng},${r.status}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `EDR_Accident_Report_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      addLog("XUẤT FILE", "Đã xuất báo cáo EDR tai nạn dạng file CSV về máy tính.");
+    }
+
+    // --- 7. QUẢN LÝ NHẬT KÝ SỰ KIỆN (EVENT LOG) ---
+    let logCounter = 1;
+
+    function addLog(tag, msg, isCrash = false) {
+      const container = document.getElementById('log-container');
+      const timeStr = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      div.innerHTML = `
+        <span class="log-ts">[${timeStr}]</span>
+        <span class="${isCrash ? 'log-tag-crash' : (tag === 'HỆ THỐNG' ? 'log-tag-sys' : 'log-tag-normal')}">[${tag}] ${msg}</span>
+      `;
+      container.insertBefore(div, container.firstChild);
+      logCounter++;
+      document.getElementById('log-total-badge').innerText = `${logCounter} sự kiện`;
+    }
+
+    // --- 8. KẾT NỐI & QUẢN LÝ MQTT OVER WEBSOCKET ---
+    function normalizeBrokerUrl(url) {
+      if (!url) return 'wss://k117efa8.ala.asia-southeast1.emqxsl.com:8084/mqtt';
+      let u = url.trim();
+      if (!u.startsWith('ws://') && !u.startsWith('wss://')) {
+        u = 'wss://' + u;
+      }
+      const match = u.match(/^(wss?:\/\/)([^/:]+)(?::(\d+))?(\/.*)?$/);
+      if (match) {
+        const proto = match[1];
+        const host = match[2];
+        const port = match[3] || '8084';
+        let path = match[4] || '/mqtt';
+        if (!path.endsWith('/mqtt')) {
+          path = path.replace(/\/+$/, '') + '/mqtt';
+        }
+        return `${proto}${host}:${port}${path}`;
+      }
+      return u;
+    }
+
+    let brokerUrl = normalizeBrokerUrl(localStorage.getItem('edr_mqtt_broker') || 'wss://k117efa8.ala.asia-southeast1.emqxsl.com:8084/mqtt');
+    let topic = localStorage.getItem('edr_mqtt_topic') || 'edr_blackbox/telemetry';
+    let mqttUser = localStorage.getItem('edr_mqtt_user') || 'blackbox';
+    let mqttPass = localStorage.getItem('edr_mqtt_pass') || '123456';
+
+    let client = null;
+    const connPill = document.getElementById('conn-pill');
+    const connText = document.getElementById('conn-text');
+
+    function connectMQTT() {
+      if (client) {
+        try { client.end(true); } catch (e) {}
+      }
+
+      connPill.className = 'status-pill pill-offline';
+      connText.innerText = 'Đang kết nối MQTT...';
+
+      const options = {
+        clientId: 'EDR_Dashboard_' + Math.random().toString(16).substr(2, 8),
+        clean: true,
+        reconnectPeriod: 3000,
+        connectTimeout: 5000
+      };
+      if (mqttUser) options.username = mqttUser;
+      if (mqttPass) options.password = mqttPass;
+
+      try {
+        client = mqtt.connect(brokerUrl, options);
+
+        client.on('connect', () => {
+          connPill.className = 'status-pill pill-online';
+          const isCustom = !brokerUrl.includes('broker.emqx.io');
+          connText.innerText = isCustom ? 'ONLINE (EMQX Cloud)' : 'ONLINE (EMQX Public)';
+          client.subscribe(topic);
+          addLog("HỆ THỐNG", `Kết nối thành công máy chủ MQTT riêng: ${brokerUrl}`);
+        });
+
+        client.on('offline', () => {
+          connPill.className = 'status-pill pill-offline';
+          connText.innerText = 'OFFLINE (Đang thử lại...)';
+        });
+
+        client.on('error', (err) => {
+          console.error("MQTT Error:", err);
+          connPill.className = 'status-pill pill-offline';
+          connText.innerText = 'LỖI KẾT NỐI MQTT';
+          addLog("LỖI MQTT", err.message || "Không thể kết nối tới Broker");
+        });
+
+        client.on('message', handleIncomingTelemetry);
+
+      } catch (err) {
+        console.error("MQTT Connect exception:", err);
+      }
+    }
+
+    // Modal Cấu hình MQTT
+    function openMqttModal() {
+      document.getElementById('cfg-broker-url').value = brokerUrl;
+      document.getElementById('cfg-topic').value = topic;
+      document.getElementById('cfg-username').value = mqttUser;
+      document.getElementById('cfg-password').value = mqttPass;
+      document.getElementById('mqttConfigModal').style.display = 'flex';
+    }
+
+    function closeMqttModal() {
+      document.getElementById('mqttConfigModal').style.display = 'none';
+    }
+
+    function saveMqttConfig() {
+      let newBroker = document.getElementById('cfg-broker-url').value.trim();
+      const newTopic = document.getElementById('cfg-topic').value.trim();
+      const newUser = document.getElementById('cfg-username').value.trim();
+      const newPass = document.getElementById('cfg-password').value.trim();
+
+      if (!newBroker || !newTopic) {
+        alert("Vui lòng nhập đầy đủ Địa chỉ Broker WSS và Kênh dữ liệu Topic!");
+        return;
+      }
+
+      newBroker = normalizeBrokerUrl(newBroker);
+      brokerUrl = newBroker;
+      topic = newTopic;
+      mqttUser = newUser;
+      mqttPass = newPass;
+
+      localStorage.setItem('edr_mqtt_broker', brokerUrl);
+      localStorage.setItem('edr_mqtt_topic', topic);
+      localStorage.setItem('edr_mqtt_user', mqttUser);
+      localStorage.setItem('edr_mqtt_pass', mqttPass);
+
+      addLog("CẤU HÌNH", `Đã lưu cấu hình MQTT (${brokerUrl}). Đang kết nối lại...`);
+      closeMqttModal();
+      connectMQTT();
+    }
+
+    function resetMqttConfigDefault() {
+      brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
+      topic = 'edr_blackbox/telemetry';
+      mqttUser = '';
+      mqttPass = '';
+
+      localStorage.removeItem('edr_mqtt_broker');
+      localStorage.removeItem('edr_mqtt_topic');
+      localStorage.removeItem('edr_mqtt_user');
+      localStorage.removeItem('edr_mqtt_pass');
+
+      document.getElementById('cfg-broker-url').value = brokerUrl;
+      document.getElementById('cfg-topic').value = topic;
+      document.getElementById('cfg-username').value = '';
+      document.getElementById('cfg-password').value = '';
+
+      addLog("CẤU HÌNH", "Đã khôi phục cài đặt MQTT về máy chủ Public ban đầu.");
+      closeMqttModal();
+      connectMQTT();
+    }
+
+    // Cập nhật đồng hồ RTC thời gian thực
+    setInterval(() => {
+      document.getElementById('val-rtc-clock').innerText = new Date().toLocaleString();
+    }, 1000);
+
+    // Bắt đầu kết nối MQTT
+    connectMQTT();
+
+    // --- 9. XỬ LÝ GÓI TIN TELEMETRY TỪ HỘP ĐEN ---
+    let countdownInterval = null;
+    let countdownSeconds = 15;
+    let isReplayMode = false;
+
+    function handleIncomingTelemetry(t, payload) {
+      if (isReplayMode) return; // Nếu đang tua lại hiện trường thì không ghi đè dữ liệu live
+      try {
+        const data = JSON.parse(payload.toString());
+        const now = new Date().toLocaleTimeString();
+        recordTelemetry(data);
+
+        // 1. Tốc độ
+        const speed = Number(data.speed || 0);
+        updateSpeedGauge(speed);
+
+        // 2. Góc nghiêng & xoay Icon xe
+        const roll = Number(data.roll || 0).toFixed(1);
+        const pitch = Number(data.pitch || 0).toFixed(1);
+        document.getElementById('val-roll').innerText = roll;
+        document.getElementById('val-pitch').innerText = pitch;
+        document.getElementById('bike-roll-icon').style.transform = `rotate(${roll}deg)`;
+
+        // 3. Gia tốc 3 trục
+        const ax = Number(data.ax || 0).toFixed(2);
+        const ay = Number(data.ay || 0).toFixed(2);
+        const az = Number(data.az || 0).toFixed(2);
+        document.getElementById('val-ax').innerText = `${ax} m/s²`;
+        document.getElementById('val-ay').innerText = `${ay} m/s²`;
+        document.getElementById('val-az').innerText = `${az} m/s²`;
+
+        // Tính G-Force tổng hợp: sqrt(ax^2 + ay^2 + az^2) / 9.81
+        const gTotal = (Math.sqrt(ax*ax + ay*ay + az*az) / 9.81).toFixed(2);
+        document.getElementById('val-gtotal').innerText = `${gTotal} G`;
+
+        document.getElementById('bar-ax').style.width = `${Math.min(100, Math.abs(ax) * 4)}%`;
+        document.getElementById('bar-ay').style.width = `${Math.min(100, Math.abs(ay) * 4)}%`;
+        document.getElementById('bar-az').style.width = `${Math.min(100, Math.abs(az) * 5)}%`;
+
+        pushChartData(Number(ax), Number(ay), Number(az));
+
+        // 4. Vị trí bản đồ GIS & Sai số HDOP
+        if (data.lat && data.lng && data.lat !== 0) {
+          const pos = [data.lat, data.lng];
+          marker.setLatLng(pos);
+          accuracyCircle.setLatLng(pos);
+          trailLine.addLatLng(pos);
+          map.panTo(pos);
+          document.getElementById('val-lat').innerText = Number(data.lat).toFixed(6);
+          document.getElementById('val-lng').innerText = Number(data.lng).toFixed(6);
+        }
+
+        // 5. Chẩn đoán
+        document.getElementById('val-device').innerText = data.device || 'EDR_DEVICE';
+        if (data.sats !== undefined) {
+          document.getElementById('diag-sats').innerText = `${data.sats} Vệ tinh (${data.sats >= 4 ? '3D Fix' : 'Yếu'})`;
+          accuracyCircle.setRadius(data.sats >= 10 ? 3 : 8);
+        }
+
+        // 6. Xử lý Trạng thái Tai Nạn vs Bình Thường
+        const alarmBanner = document.getElementById('alarm-banner');
+        const alarmText = document.getElementById('alarm-text');
+        const alarmIcon = document.getElementById('alarm-icon');
+        const countdownBox = document.getElementById('countdown-box');
+
+        if (data.status === "CRASH_DETECTED") {
+          alarmBanner.className = 'alarm-banner banner-crash';
+          alarmIcon.innerText = '⚠️';
+          alarmText.innerHTML = 'CẢNH BÁO: TAI NẠN / TÉ NGÃ! <button onclick="openReplayModal()" style="margin-left:8px; padding:3px 10px; font-size:11px; font-weight:800; background:white; color:#ef4444; border:none; border-radius:12px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.2);">🎬 Xem Tái Hiện</button>';
+          startContinuousSiren();
+
+          // Thả ghim cờ đỏ trên bản đồ tại hiện trường
+          if (data.lat && data.lng) {
+            const crashMarker = L.circleMarker([data.lat, data.lng], {
+              radius: 12, color: '#ef4444', fillColor: '#f87171', fillOpacity: 0.9, weight: 3
+            }).addTo(map);
+            crashMarker.bindPopup(`
+              <div style="font-size:12px; line-height:1.6;">
+                <b>⚠️ HIỆN TRƯỜNG TAI NẠN!</b><br>
+                Thời gian: <b>${now}</b><br>
+                Lực va chạm: <b style="color:#ef4444;">${gTotal} G</b><br>
+                Góc lật xe: <b>${roll}°</b><br>
+                <div style="margin-top:6px; display:flex; gap:6px;">
+                  <a href="javascript:void(0)" onclick="openReplayModal()" style="color:#0284c7; font-weight:700;">[🎬 Xem Tái Hiện 30s]</a>
+                  <a href="javascript:void(0)" onclick="openForensicModal()" style="color:#0284c7; font-weight:700;">[📄 Biên Bản EDR]</a>
+                </div>
+              </div>
+            `).openPopup();
+            crashMarkers.push(crashMarker);
+          }
+
+          addLog("TAI NẠN", `Phát hiện va chạm! (Roll: ${roll}°, Lực: ${gTotal}G, Tốc độ: ${speed.toFixed(1)} km/h)`, true);
+
+          // Bắt đầu đếm ngược 15s
+          if (!countdownInterval) {
+            countdownSeconds = 15;
+            countdownBox.style.display = 'inline-block';
+            countdownInterval = setInterval(() => {
+              countdownSeconds--;
+              document.getElementById('countdown-timer').innerText = countdownSeconds;
+              if (countdownSeconds <= 0) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+                countdownBox.style.display = 'none';
+                addLog("KHẨN CẤP", "Đã hết 15s chờ: Đang gửi tin nhắn cảnh báo SOS kèm tọa độ tới người thân!");
+              }
+            }, 1000);
+          }
+        } else {
+          // Trạng thái bình thường
+          stopContinuousSiren();
+          if (!countdownInterval) {
+            alarmBanner.className = 'alarm-banner banner-normal';
+            alarmIcon.innerText = '🛡️';
+            alarmText.innerText = 'TRẠNG THÁI: BÌNH THƯỜNG';
+          }
+        }
+
+      } catch (err) {
+        console.error("Lỗi parse JSON:", err);
+      }
+    }
+
+    // --- 10. TÍNH NĂNG ĐẮC GIÁ 1: TÁI HIỆN HIỆN TRƯỜNG 30s (ACCIDENT PLAYBACK) ---
+    // Sinh mảng 51 điểm dữ liệu viễn trắc 30 giây mẫu (-10s đến +15s)
+    let replayBuffer = [];
+    let replayTimer = null;
+    let isReplayPlaying = false;
+
+    function buildReplayBuffer() {
+      replayBuffer = [];
+      const baseLat = 10.776889;
+      const baseLng = 106.700806;
+      for (let t = -10.0; t <= 15.0; t += 0.5) {
+        let pt = { t: Number(t.toFixed(1)) };
+        if (t < 0) {
+          // Pha trước va chạm (Pre-crash): Xe chạy ổn định 46 - 49 km/h
+          const ratio = (t + 10) / 10;
+          pt.lat = baseLat - 0.0015 * (1 - ratio);
+          pt.lng = baseLng - 0.0015 * (1 - ratio);
+          pt.speed = 48.5 + (Math.sin(t) * 1.5);
+          pt.roll = 3.5 * Math.sin(t * 2);
+          pt.pitch = -1.2;
+          pt.ax = 0.8 + Math.sin(t) * 0.4;
+          pt.ay = 0.3 * Math.cos(t);
+          pt.az = 9.81 + Math.sin(t * 3) * 0.5;
+          pt.status = "NORMAL";
+        } else if (t === 0.0) {
+          // Điểm va chạm cực đại (Impact Point T0)
+          pt.lat = baseLat;
+          pt.lng = baseLng;
+          pt.speed = 48.5;
+          pt.roll = 68.5;
+          pt.pitch = -35.2;
+          pt.ax = 28.50;
+          pt.ay = 18.20;
+          pt.az = -15.40;
+          pt.status = "CRASH_DETECTED";
+        } else if (t <= 2.0) {
+          // Pha văng xe và trượt (0s -> +2s)
+          pt.lat = baseLat + 0.0001;
+          pt.lng = baseLng + 0.0001;
+          pt.speed = Math.max(0, 48.5 - t * 24);
+          pt.roll = 68.5;
+          pt.pitch = -15.0;
+          pt.ax = Math.max(0, 10 - t * 5);
+          pt.ay = Math.max(0, 6 - t * 3);
+          pt.az = 4.0;
+          pt.status = "CRASH_DETECTED";
+        } else {
+          // Pha sau va chạm (Post-crash): Xe nằm im tại hiện trường
+          pt.lat = baseLat + 0.00012;
+          pt.lng = baseLng + 0.00012;
+          pt.speed = 0.0;
+          pt.roll = 68.5;
+          pt.pitch = 0.0;
+          pt.ax = 0.0;
+          pt.ay = 0.0;
+          pt.az = 0.0;
+          pt.status = "CRASH_DETECTED";
+        }
+        replayBuffer.push(pt);
+      }
+    }
+    buildReplayBuffer();
+
+    function seekReplay(targetSec) {
+      document.getElementById('replay-slider').value = targetSec;
+      onReplaySliderInput(targetSec);
+    }
+
+    function openReplayModal() {
+      document.getElementById('replayModal').style.display = 'flex';
+      const val = document.getElementById('replay-slider').value;
+      onReplaySliderInput(val);
+    }
+
+    function closeReplayModal() {
+      document.getElementById('replayModal').style.display = 'none';
+      if (isReplayPlaying) toggleReplayPlay();
+    }
+
+    function onReplaySliderInput(val) {
+      isReplayMode = true;
+      document.getElementById('replay-status-badge').innerText = `ĐANG TÁI HIỆN (T = ${Number(val) > 0 ? '+' : ''}${Number(val).toFixed(1)}s)`;
+      document.getElementById('replay-status-badge').style.color = '#f59e0b';
+      document.getElementById('replay-time-label').innerText = `T: ${Number(val) > 0 ? '+' : ''}${Number(val).toFixed(1)}s`;
+
+      // Tìm điểm gần nhất trong buffer
+      const pt = replayBuffer.reduce((prev, curr) => Math.abs(curr.t - val) < Math.abs(prev.t - val) ? curr : prev);
+      if (!pt) return;
+
+      // Cập nhật lên Dashboard
+      updateSpeedGauge(pt.speed);
+      document.getElementById('val-roll').innerText = pt.roll.toFixed(1);
+      document.getElementById('val-pitch').innerText = pt.pitch.toFixed(1);
+      document.getElementById('bike-roll-icon').style.transform = `rotate(${pt.roll}deg)`;
+
+      document.getElementById('val-ax').innerText = `${pt.ax.toFixed(2)} m/s²`;
+      document.getElementById('val-ay').innerText = `${pt.ay.toFixed(2)} m/s²`;
+      document.getElementById('val-az').innerText = `${pt.az.toFixed(2)} m/s²`;
+
+      const gTotal = (Math.sqrt(pt.ax*pt.ax + pt.ay*pt.ay + pt.az*pt.az) / 9.81).toFixed(2);
+      document.getElementById('val-gtotal').innerText = `${gTotal} G`;
+
+      document.getElementById('bar-ax').style.width = `${Math.min(100, Math.abs(pt.ax) * 4)}%`;
+      document.getElementById('bar-ay').style.width = `${Math.min(100, Math.abs(pt.ay) * 4)}%`;
+      document.getElementById('bar-az').style.width = `${Math.min(100, Math.abs(pt.az) * 5)}%`;
+
+      marker.setLatLng([pt.lat, pt.lng]);
+      accuracyCircle.setLatLng([pt.lat, pt.lng]);
+      map.panTo([pt.lat, pt.lng]);
+
+      // Cập nhật bảng thông số bên trong Replay Modal
+      const statSpeed = document.getElementById('replay-stat-speed');
+      if (statSpeed) statSpeed.innerText = `${pt.speed.toFixed(1)} km/h`;
+      const statRoll = document.getElementById('replay-stat-roll');
+      if (statRoll) statRoll.innerText = `${pt.roll.toFixed(1)}°`;
+      const statG = document.getElementById('replay-stat-g');
+      if (statG) statG.innerText = `${gTotal} G`;
+      const statStatus = document.getElementById('replay-stat-status');
+      if (statStatus) {
+        statStatus.innerText = pt.status;
+        statStatus.style.color = pt.status === 'CRASH_DETECTED' ? '#ef4444' : '#10b981';
+      }
+
+      // Banner trạng thái
+      const alarmBanner = document.getElementById('alarm-banner');
+      const alarmText = document.getElementById('alarm-text');
+      const alarmIcon = document.getElementById('alarm-icon');
+      if (pt.status === "CRASH_DETECTED") {
+        alarmBanner.className = 'alarm-banner banner-crash';
+        alarmIcon.innerText = '⚠️';
+        alarmText.innerHTML = 'CẢNH BÁO: TAI NẠN / TÉ NGÃ! <button onclick="openReplayModal()" style="margin-left:8px; padding:3px 10px; font-size:11px; font-weight:800; background:white; color:#ef4444; border:none; border-radius:12px; cursor:pointer;">🎬 Tái Hiện 30s</button>';
+      } else {
+        alarmBanner.className = 'alarm-banner banner-normal';
+        alarmIcon.innerText = '🛡️';
+        alarmText.innerText = 'TRẠNG THÁI: BÌNH THƯỜNG';
+      }
+
+      // Tô điểm chỉ báo trên đồ thị Chart.js
+      renderReplayChartState(pt.t);
+    }
+
+    function renderReplayChartState(currentT) {
+      const axList = replayBuffer.map(p => p.ax);
+      const ayList = replayBuffer.map(p => p.ay);
+      const azList = replayBuffer.map(p => p.az);
+      accelChart.data.datasets[0].data = axList.slice(0, 26);
+      accelChart.data.datasets[1].data = ayList.slice(0, 26);
+      accelChart.data.datasets[2].data = azList.slice(0, 26);
+      accelChart.update();
+    }
+
+    function toggleReplayPlay() {
+      const btn = document.getElementById('btn-replay-play');
+      if (isReplayPlaying) {
+        clearInterval(replayTimer);
+        isReplayPlaying = false;
+        btn.innerText = '▶️ Phát Lại';
+      } else {
+        isReplayPlaying = true;
+        btn.innerText = '⏸️ Tạm Dừng';
+        let currentVal = parseFloat(document.getElementById('replay-slider').value);
+        if (currentVal >= 15.0) currentVal = -10.0;
+
+        replayTimer = setInterval(() => {
+          currentVal += 0.5;
+          if (currentVal > 15.0) {
+            clearInterval(replayTimer);
+            isReplayPlaying = false;
+            btn.innerText = '▶️ Phát Lại';
+            return;
+          }
+          seekReplay(currentVal);
+          if (Math.abs(currentVal - 0.0) < 0.1) {
+            triggerSirenSound();
+          }
+        }, 300);
+      }
+    }
+
+    // --- 11. ĐIỀU KHIỂN DEMO 2 CHIỀU: CHẠY BÌNH THƯỜNG VS TAI NẠN ---
+    let normalDriveTimer = null;
+
+    function resumeNormalDriving() {
+      if (isReplayPlaying) toggleReplayPlay();
+      isReplayMode = false;
+      closeReplayModal();
+      stopContinuousSiren();
+
+      // Xóa interval đếm ngược nếu có
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+        document.getElementById('countdown-box').style.display = 'none';
+      }
+
+      // Khôi phục banner về an toàn
+      const alarmBanner = document.getElementById('alarm-banner');
+      alarmBanner.className = 'alarm-banner banner-normal';
+      document.getElementById('alarm-icon').innerText = '🛡️';
+      document.getElementById('alarm-text').innerText = 'TRẠNG THÁI: BÌNH THƯỜNG';
+      document.getElementById('replay-status-badge').innerText = 'CHẾ ĐỘ THỜI GIAN THỰC';
+      document.getElementById('replay-status-badge').style.color = 'var(--accent)';
+
+      // Phát gói tin hành trình bình thường
+      const normalPacket = {
+        device: "EDR_ESP32S3_01",
+        lat: 10.776889 + (Math.random() - 0.5) * 0.001,
+        lng: 106.700806 + (Math.random() - 0.5) * 0.001,
+        speed: 42.0 + Math.random() * 5,
+        ax: 1.10,
+        ay: 0.35,
+        az: 9.81,
+        roll: 4.2 * (Math.random() - 0.5),
+        pitch: -1.0,
+        status: "NORMAL",
+        sats: 11
+      };
+      client.publish(topic, JSON.stringify(normalPacket));
+      addLog("HÀNH TRÌNH", "Đã khôi phục hành trình bình thường, xe tiếp tục lăn bánh an toàn.");
+    }
+
+    function simulateCrashEvent() {
+      if (isReplayPlaying) toggleReplayPlay();
+      isReplayMode = false;
+
+      const mockPacket = {
+        device: "EDR_ESP32S3_01",
+        lat: 10.776889 + (Math.random() - 0.5) * 0.001,
+        lng: 106.700806 + (Math.random() - 0.5) * 0.001,
+        speed: 48.5,
+        ax: 28.50,
+        ay: 18.20,
+        az: -15.40,
+        roll: 68.5,
+        pitch: -35.2,
+        status: "CRASH_DETECTED",
+        sats: 11
+      };
+      client.publish(topic, JSON.stringify(mockPacket));
+      startContinuousSiren();
+      addLog("DEMO", "Đã kích hoạt kịch bản tai nạn mẫu. Bấm '🎬 Tái Hiện 30s' để xem lại.");
+    }
+
+    // --- 12. HỘP THOẠI BIÊN BẢN PHÁP LÝ (FORENSIC MODAL) ---
+    function openForensicModal() {
+      document.getElementById('forensicModal').style.display = 'flex';
+      document.getElementById('forensic-rtc').innerText = new Date().toLocaleString();
+    }
+
+    function closeForensicModal() {
+      document.getElementById('forensicModal').style.display = 'none';
+    }
+
+    function openGoogleMapsExternal() {
+      const lat = document.getElementById('val-lat').innerText;
+      const lng = document.getElementById('val-lng').innerText;
+      window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
+    }
+  </script>
+</body>
+</html>
